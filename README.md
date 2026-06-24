@@ -64,3 +64,111 @@ adapter_name = "Hriday75/qwen2.5-3b-cardio-dpo-aligned"
 expert_model = PeftModel.from_pretrained(base_model, adapter_name)
 
 # 3. You can now run inference with `expert_model.generate(...)`
+```
+
+---
+
+## Multi-LoRA Chatbot Architecture
+
+The terminal chatbot (`chatbot.py`) is powered by a **single shared base model** with **three hot-swappable LoRA adapters** loaded simultaneously into VRAM. At inference time, a lightweight router classifies the incoming query and activates the correct adapter — with zero model reload overhead.
+
+```
+User Query
+    │
+    ▼
+┌─────────────────────────────────────┐
+│          chatbot.py  (CLI UI)        │
+│   rich terminal · session memory    │
+└──────────────────┬──────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────┐
+│        MedicalOrchestrator          │
+│         (orchestrator.py)           │
+│                                     │
+│  ┌──────────────────────────────┐   │
+│  │   Keyword Router             │   │
+│  │   (base model, no adapter)   │   │
+│  │   classifies query into:     │   │
+│  │   cardiology / oncology /    │   │
+│  │   infectious_disease         │   │
+│  └────────────┬─────────────────┘   │
+│               │  set_adapter(name)  │
+│               ▼                     │
+│  ┌──────────────────────────────┐   │
+│  │  Qwen2.5-3B-bnb-4bit (base) │   │
+│  │  ┌──────────┐ ┌──────────┐  │   │
+│  │  │Cardiology│ │ Oncology │  │   │
+│  │  │  LoRA ✓  │ │  LoRA    │  │   │  ← all 3 adapters
+│  │  └──────────┘ └──────────┘  │   │    live in VRAM
+│  │       ┌──────────────┐      │   │
+│  │       │  Infectious  │      │   │
+│  │       │ Disease LoRA │      │   │
+│  │       └──────────────┘      │   │
+│  └──────────────────────────────┘   │
+└─────────────────────────────────────┘
+               │
+               ▼
+         Expert Response
+         (with session memory
+          across turns)
+```
+
+### Key design decisions
+
+| Concern | Solution |
+| :--- | :--- |
+| **No reload cost** | All adapters are loaded once at startup via `PeftModel` + `load_adapter()` |
+| **Router is adapter-free** | `model.disable_adapter()` is used during routing so the base model classifies without expert bias |
+| **Session memory** | Per-session message history is maintained in `MedicalOrchestrator.session_memory` |
+| **Fallback routing** | Ambiguous queries default to `infectious_disease` |
+
+---
+
+## 🔑 Hugging Face Token Setup (`.env`)
+
+The models (`unsloth/Qwen2.5-3B-bnb-4bit` and all three `Hriday75/` adapters) are pulled from the Hugging Face Hub at startup. You must authenticate before running the chatbot.
+
+### Option 1 — `.env` file (recommended)
+
+1. Install `python-dotenv`:
+   ```bash
+   pip install python-dotenv
+   ```
+
+2. Create a `.env` file in the project root:
+   ```
+   HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   ```
+
+3. Load it at the top of your entry-point script (or add once to `orchestrator.py`):
+   ```python
+   from dotenv import load_dotenv
+   load_dotenv()   # reads .env → sets os.environ["HF_TOKEN"]
+   ```
+   `transformers` / `huggingface_hub` will then pick up `HF_TOKEN` automatically.
+
+> **⚠️ Never commit your `.env` file.** It is already listed in `.gitignore`.
+
+### Option 2 — Shell environment variable
+
+```bash
+# Linux / macOS
+export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Windows PowerShell
+$env:HF_TOKEN = "hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+```
+
+### Option 3 — CLI login (persists across sessions)
+
+```bash
+huggingface-cli login
+# paste your token when prompted — stored at ~/.cache/huggingface/token
+```
+
+### Where to get your token
+
+1. Go to [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
+2. Click **New token** → Role: **Read**
+3. Copy the `hf_…` string into your chosen method above.

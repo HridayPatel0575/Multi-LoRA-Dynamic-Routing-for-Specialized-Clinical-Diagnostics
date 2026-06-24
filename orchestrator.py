@@ -61,9 +61,7 @@ class MedicalOrchestrator:
         self.session_memory: dict[str, list[dict]] = {}
         print("Orchestrator ready.\n")
 
-    # ------------------------------------------------------------------
-    # Session helpers
-    # ------------------------------------------------------------------
+
 
     def get_session(self, session_id: str) -> list[dict]:
         if session_id not in self.session_memory:
@@ -77,9 +75,7 @@ class MedicalOrchestrator:
             {"role": "system", "content": SYSTEM_PROMPT}
         ]
 
-    # ------------------------------------------------------------------
-    # Routing
-    # ------------------------------------------------------------------
+
 
     def route_query(self, user_query: str) -> str:
         prompt = ROUTING_PROMPT.format(query=user_query)
@@ -107,9 +103,6 @@ class MedicalOrchestrator:
         # Fallback: let the full history guide which expert is most relevant
         return "infectious_disease"
 
-    # ------------------------------------------------------------------
-    # Chat
-    # ------------------------------------------------------------------
 
     def _format_prompt(self, history: list[dict]) -> torch.Tensor:
         """Formats the chat history into model input tensors.
